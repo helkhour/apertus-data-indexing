@@ -1,146 +1,63 @@
-# Apertus Pre-Training data indexing
+# Apertus Indexing
 
-An ElasticSearch Deployment on Clariden ALPS CSCS Cluster. 
-This is the supporting code for the paper "Getting Your Indices in a Row: Full-Text Search for LLM Training Data for Real World" by Ines Altemir Marinas, Anastasiia Kucherenko, Alexander Sternfeld, Andrei Kucharavy, available at http://arxiv.org/abs/2510.09471. 
+This repository is now reduced to the shared Elasticsearch indexing package used by:
 
-## Repository structure :books:
--- **scripts** \
-&nbsp;&nbsp;&nbsp;&nbsp;|--- *detokenize* \
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|--- ```megatron_detokenizer.py```: Helper functions. \
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|--- ```batch_detokenize.py```: Script to batch process Megatron datasets. \
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|--- ```detokenize.sh```: Megatron dataset detokenization script for SLURM. \
-&nbsp;&nbsp;&nbsp;&nbsp;|--- *index* \
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|--- ```index.py```: Indexer script for Elasticsearch with multi-process support. \
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|--- ```index_with_id.py```: Script with added content-based SHA256 document IDs for deduplication. \
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|--- ```index.sh```: Script to run indexing for Slurm. \
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|--- ```index_with_id.sh```: Script to run indexing with id for Slurm. \
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|--- ```indexing_job_status.py```: Script to automatically evaluate the indexing jobs, detect failures and output statistics. \
-&nbsp;&nbsp;&nbsp;&nbsp;|--- *merge* \
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|--- ```merge.py```: Remote reindex merge script for Elasticsearch. \
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|--- ```merge.sh```: Slurm script to run merge operation. \
-&nbsp;&nbsp;&nbsp;&nbsp;|--- *search* \
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|--- ```search.py```: Script to perform various search query types across multiple CSV files. \
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|--- ```search.sh```: . \
--- **results** \
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|--- ```Indexing_performance```: Results for the indexing operation on the Apertus pre-training data. \
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|--- ```Search```: Results for the search queries upon constructed indexes. \
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|--- ```Merge```: Results for the merging operation of source indexes into unified target indexes. \
--- **container_image** \
-&nbsp;&nbsp;&nbsp;&nbsp;|--- ```Dockerfile```: Dockerfile for the Container Image. \
--- **search_queries** \
-&nbsp;&nbsp;&nbsp;&nbsp;|--- ```chemicals```: Contains the test datasets for chemical queries. \
-&nbsp;&nbsp;&nbsp;&nbsp;|--- ```ObsceneWords```: Contains the test dataset for Obscene Words. \
-&nbsp;&nbsp;&nbsp;&nbsp;|--- ```WeaponizedWords```: Contains the test dataset for Weaponized Words. \
-&nbsp;&nbsp;&nbsp;&nbsp;|--- ```Verbatim```: Contains the test dataset and code needed to reproduce verbatim samples. \
+- `search-index` / `web-search` MCP runtime
+- `rob-poc` Kubernetes deployment
 
-## Container Creation
-The container_image folder contains the Dockerfile for the Container Image. Exact instructions on how to proceed are:
-1. There is a created Dockerfile with desired packages, in “container_image/" folder 
-2. Ensure you're in the directory containing the `Dockerfile` and run:
-    podman build -t image:tag
-3. enroot import -x mount -o <image_name.sqsh> podman://image:tag
-4. Create .toml file in home directory /.edf path. 
-    ```python
-    image = "/container_image/<image_name.sqsh>"
-    workdir = "/capstor/scratch/cscs/<username>"
-    writable = true
-    mounts = [
-        "/iopsstor/scratch/cscs/<username>:/iopsstor/scratch/cscs/<username>",
-        "/capstor/scratch/cscs/<username>:/capstor/scratch/cscs/<username>",
-        "/iopsstor/scratch/cscs/<username>/es-data:/usr/share/elasticsearch/data",
-        "/iopsstor/scratch/cscs/<username>/es-logs:/usr/share/elasticsearch/logs"
-    ]
-    [annotations.com.hooks.ssh]
-    enabled = "true"
-    ```
-    Mount every directory you wish to be able to work from with this container.
-        
-5. Open the container with: srun -A a-<account_number> --environment=<image_name> --pty bash
+Legacy SLURM indexing/search scripts and archived result artifacts were removed.
 
-# Scripts
+## Package
 
-## Index
+- Distribution: `apertus-indexing`
+- Import path: `apertus_indexing`
+- Source: `src/apertus_indexing`
+- Bootstrap CLI: `apertus-indexing-es-bootstrap`
 
-The main code part running the indexing of the data. 
+Install locally:
 
-## Search 
-We explain the different types of search queries implemented in this Elasticsearch search queries pipeline. Each query type serves different search scenarios and has specific use cases, limitations, and performance characteristics.
-
-### Query Types Overview
-
-The pipeline implements **6 different query types** that can be selectively enabled/disabled through configuration flags:
-
-### 1. Match Query (`match_query`)
-**Purpose**: the standard query for performing a (general) full-text search
-
-**How it works**:
-- Performs an OR query for all individual terms in the search phrase by default
-- Analyzes the input text and searches for each term separately
-- Terms can appear in any order within the document
-- Can be configured to use AND operator (all terms must be present, set <operator> parameter)
-- Finding documents that contain most/all search terms (higher score - explain in detail how computed)
-- Handling synonyms and stemming through analyzers (depends on analyzer used - can parametrize this too to have +- harsh analyzer)
-
-### 2. Match Phrase Query (`match_phrase_query`)
-**Purpose**: Exact phrase matching with word order preservation
-
-**How it works**:
-- Searches for the exact phrase where word order matters
-- Functions as an AND clause between all individual terms with positional information
-- Supports slop parameter for allowing word gaps
-
-
-### 3. Wildcard Query (`wildcard_query`) 
-**Purpose**: Pattern matching with wildcards on single tokens
-
-**How it works**:
-- Performs single token matching with wildcard patterns (`*text*`)
-- Works on individual tokens, not across multiple tokens
-- **Limitation**: Only executes on single words - skips multi-word phrases
-- More expensive than other query types - slower due to pattern matching complexity
-- Performs partial word matching, finding variations of a root word (same as match_phrase with stemmer?)
-
-### 4. Fuzzy Query (`fuzzy_query`)
-**Purpose**: Handling typos and spelling variations
-
-**How it works**:
-- Designed for single words with typos or spelling variations
-- Uses edit distance (Levenshtein distance) with "AUTO" fuzziness
-- **Fallback**: For multi-word phrases, uses `multi_match` with fuzziness and AND operator
-- Tries to match against single tokens
-
-### 5. Boolean Must Query (`bool_must_query`)
-**Purpose**: Complex boolean combinations with multiple conditions
-
-**How it works**:
-- Combines multiple match conditions using boolean logic
-- All conditions must be satisfied (AND logic)
-- If single word provided, duplicates it for the boolean structure
-- Can construct advanced filtering scenarios for complex search requirements
-
-
-**Output and Analysis**
-
-Each query execution provides:
-- **Response time**: Query execution time in milliseconds
-- **Hit count**: Number of matching documents
-- **Score information**: Relevance scoring details
-- **Hit snippets**: Top 5 results with highlighted matches
-
-**Configuration Options**
-
-```python
-# Query execution flags - set to False to skip query types
-execute_match_query = True
-execute_match_phrase_query = True
-execute_wildcard_query = True
-execute_fuzzy_query = True
-execute_bool_must_query = False  
-```
-
-**Notes**
-When coding on windows and doing scp, use this to remove Windows CLRF tokens:
 ```bash
-sed -i 's/\r$//' /path/to/index.sh
+pip install -e .
 ```
 
+## What it provides
+
+- Elasticsearch config loading from environment
+- index template + alias bootstrap
+- bulk indexing with retry/batching
+- chunk query helper
+- fetch by document id helper
+
+## Adding New Data Types
+
+Current production usage is `web`, but this package is meant to be reused for other sources.
+
+For a new data type (example: `pdf`, `github`, `docs`):
+
+1. Build source-specific ingestion in the source module/repo (not here).
+2. Emit the same canonical record families already used by web:
+   - page/content records
+   - chunk records
+   - ingest status records
+3. Include `data_type` on records so query/fetch can distinguish source origin.
+4. Reuse this package for:
+   - alias/template bootstrap
+   - bulk indexing
+   - query/fetch helpers
+5. Wire the MCP tool to call the new source ingestion, then index through this package (same flow as web).
+
+This keeps source logic separate while preserving one shared indexing standard.
+
+## Repository layout
+
+```text
+.
+├── pyproject.toml
+├── README.md
+├── TODO_PRODUCTION_HARDENING.md
+└── src/
+    └── apertus_indexing/
+        ├── __init__.py
+        ├── es_bootstrap_cli.py
+        └── es_indexer.py
+```
